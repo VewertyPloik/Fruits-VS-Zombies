@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ghost Hunter</title>
+<style>
+  body {
+    background: #111;
+    color: white;
+    font-family: monospace, monospace;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  #game {
+    margin-top: 20px;
+    position: relative;
+    width: 250px; /* 5 cells * 50px */
+    height: 250px;
+    background: #222;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    gap: 2px;
+  }
+  .cell {
+    background: #333;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 32px;
+    position: relative;
+  }
+  #info {
+    margin-top: 15px;
+    font-size: 18px;
+  }
+  #healthBarPlayer, #healthBarGhost {
+    width: 100px;
+    height: 10px;
+    background: #444;
+    border: 1px solid #666;
+    margin: 5px 0;
+    position: relative;
+  }
+  #healthPlayerFill, #healthGhostFill {
+    height: 100%;
+    background: #0f0;
+    width: 100%;
+  }
+  #healthGhostFill {
+    background: #f00;
+  }
+  #scoreBoard {
+    margin-top: 10px;
+    font-size: 16px;
+  }
+  #message {
+    margin-top: 10px;
+    font-size: 20px;
+    color: #ff4444;
+  }
+  button {
+    margin-top: 10px;
+    padding: 8px 15px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<h1>Ghost Hunter</h1>
+<div id="healthBarPlayer">
+  <div id="healthPlayerFill"></div>
+</div>
+<div id="healthBarGhost" style="display:none;">
+  <div id="healthGhostFill"></div>
+</div>
+
+<div id="game"></div>
+
+<div id="info">
+  <div>Use Arrow Keys to move</div>
+  <div>Press Space to shoot</div>
+</div>
+
+<div id="scoreBoard">
+  Score: <span id="score">0</span> | High Score: <span id="highScore">0</span>
+</div>
+
+<div id="message"></div>
+<button id="restartBtn" style="display:none;">Restart</button>
+
+<script>
+(() => {
+  const GRID_SIZE = 5;
+  const CELL_SIZE = 50; // px
+  const PLAYER_HP_MAX = 25;
+  const GHOST_BASE_HP = 10;
+  const GUN_DAMAGE = 10;
+  const DAMAGE_ON_TOUCH = 5;
+  const GHOST_HP_INCREASE_INTERVAL = 10000; // 10 seconds
+
+  const gameEl = document.getElementById('game');
+  const healthPlayerFill = document.getElementById('healthPlayerFill');
+  const healthGhostFill = document.getElementById('healthGhostFill');
+  const healthBarGhost = document.getElementById('healthBarGhost');
+  const scoreEl = document.getElementById('score');
+  const highScoreEl = document.getElementById('highScore');
+  const messageEl = document.getElementById('message');
+  const restartBtn = document.getElementById('restartBtn');
+
+  let grid = [];
+  let player = {
+    x: 0,
+    y: Math.floor(GRID_SIZE / 2),
+    hp: PLAYER_HP_MAX
+  };
+  let bullets = []; // {x, y}
+  let ghosts = []; // {x, y, hp}
+  let ghostBaseHp = GHOST_BASE_HP;
+  let score = 0;
+  let highScore = 0;
+  let gameOver = false;
+  let lastGhostHpIncreaseTime = 0;
+
+  // Load high score from localStorage
+  function loadHighScore() {
+    let hs = localStorage.getItem('ghostHunterHighScore');
+    if (hs !== null) highScore = parseInt(hs);
+    highScoreEl.textContent = highScore;
+  }
+  function saveHighScore() {
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem('ghostHunterHighScore', highScore);
+      highScoreEl.textContent = highScore;
+    }
+  }
+
+  // Create grid cells
+  function createGrid() {
+    gameEl.innerHTML = '';
+    grid = [];
+    for(let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+      const cell = document.createElement('div');
+      cell.classList.add('cell');
+      gameEl.appendChild(cell);
+      grid.push(cell);
+    }
+  }
+
+  // Get cell index from x,y
+  function cellIndex(x,y) {
+    return y * GRID_SIZE + x;
+  }
+
+  // Draw everything on grid
+  function drawGrid() {
+    // Clear all cells
+    for(let cell of grid) cell.textContent = '';
+    healthBarGhost.style.display = 'none';
+
+    // Draw ghosts
+    for(let g of ghosts) {
+      if(g.x >= 0 && g.x < GRID_SIZE && g.y >= 0 && g.y < GRID_SIZE) {
+        grid[cellIndex(g.x, g.y)].textContent = '👻';
+      }
+    }
+
+    // Draw bullets
+    for(let b of bullets) {
+      if(b.x >= 0 && b.x < GRID_SIZE && b.y >= 0 && b.y < GRID_SIZE) {
+        grid[cellIndex(b.x, b.y)].textContent = '-';
+      }
+    }
+
+    // Draw player with mirrored gun 🔫 (gun on right side)
+    // We combine the characters for player and gun for effect.
+    // Since it's monospace, put 😀 then 🔫 right next to each other horizontally in one cell or adjacent cells.
+    // We'll put 😀 in player cell, and 🔫 in the next cell if exists.
+    if(player.x >= 0 && player.x < GRID_SIZE && player.y >= 0 && player.y < GRID_SIZE) {
+      grid[cellIndex(player.x, player.y)].textContent = '😀';
+      if(player.x + 1 < GRID_SIZE) {
+        grid[cellIndex(player.x + 1, player.y)].textContent = '🔫';
+      }
+    }
+
+    // Show ghost health bar if any ghost in grid
+    if(ghosts.length > 0) {
+      let firstGhost = ghosts[0];
+      healthBarGhost.style.display = 'block';
+      healthGhostFill.style.width = ((firstGhost.hp / ghostBaseHp) * 100) + '%';
+    }
+  }
+
+  // Update health bar for player
+  function updatePlayerHealthBar() {
+    let percent = (player.hp / PLAYER_HP_MAX) * 100;
+    healthPlayerFill.style.width = percent + '%';
+    if(percent > 60) healthPlayerFill.style.backgroundColor = '#0f0';
+    else if(percent > 30) healthPlayerFill.style.backgroundColor = '#ff0';
+    else healthPlayerFill.style.backgroundColor = '#f00';
+  }
+
+  // Spawn a ghost at right edge random row
+  function spawnGhost() {
+    let y = Math.floor(Math.random() * GRID_SIZE);
+    ghosts.push({x: GRID_SIZE - 1, y, hp: ghostBaseHp});
+  }
+
+  // Move ghosts one step left
+  function moveGhosts() {
+    for(let g of ghosts) {
+      g.x -= 1;
+    }
+    // Remove ghosts out of left side
+    ghosts = ghosts.filter(g => g.x >= 0);
+  }
+
+  // Move bullets one step right
+  function moveBullets() {
+    for(let b of bullets) {
+      b.x += 1;
+    }
+    // Remove bullets out of grid
+    bullets = bullets.filter(b => b.x < GRID_SIZE);
+  }
+
+  // Handle collisions bullets vs ghosts
+  function bulletsHitGhosts() {
+    for(let i = bullets.length -1; i >= 0; i--) {
+      let b = bullets[i];
+      let hitGhostIndex = ghosts.findIndex(g => g.x === b.x && g.y === b.y);
+      if(hitGhostIndex !== -1) {
+        // Damage ghost
+        ghosts[hitGhostIndex].hp -= GUN_DAMAGE;
+        bullets.splice(i,1);
+        // Explosion animation in the cell for a moment (💥)
+        const cell = grid[cellIndex(b.x, b.y)];
+        const originalText = cell.textContent;
+        cell.textContent = '💥';
+        setTimeout(() => {
+          if(!gameOver) drawGrid();
+        }, 150);
+        // Remove ghost if dead and increase score
+        if(ghosts[hitGhostIndex].hp <= 0) {
+          ghosts.splice(hitGhostIndex, 1);
+          score++;
+          scoreEl.textContent = score;
+          saveHighScore();
+        }
+      }
+    }
+  }
+
+  // Ghosts touch player damage
+  function ghostsTouchPlayer() {
+    for(let g of ghosts) {
+      if(g.x === player.x && g.y === player.y) {
+        player.hp -= DAMAGE_ON_TOUCH;
+        updatePlayerHealthBar();
+        // Remove ghost on touch
+        ghosts = ghosts.filter(ghost => ghost !== g);
+        if(player.hp <= 0) {
+          gameOver = true;
+          endGame();
+        }
+        break;
+      }
+    }
+  }
+
+  // Player movement
+  function movePlayer(dx, dy) {
+    if(gameOver) return;
+    let newX = player.x + dx;
+    let newY = player.y + dy;
+    if(newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
+      player.x = newX;
+      player.y = newY;
+      drawGrid();
+    }
+  }
+
+  // Player shooting (creates bullet 1 cell right of player)
+  function playerShoot() {
+    if(gameOver) return;
+    // Bullet starts 1 cell right of player
+    let bx = player.x + 2; // because gun is at player.x + 1
+    let by = player.y;
+    if(bx < GRID_SIZE) {
+      bullets.push({x: bx, y: by});
+      drawGrid();
+    }
+  }
+
+  // End game handler
+  function endGame() {
+    saveHighScore();
+    messageEl.textContent = `Game Over! Score: ${score} | High Score: ${highScore}`;
+    restartBtn.style.display = 'inline-block';
+  }
+
+  // Restart game
+  function restartGame() {
+    player.hp = PLAYER_HP_MAX;
+    updatePlayerHealthBar();
+    bullets = [];
+    ghosts = [];
+    score = 0;
+    scoreEl.textContent = score;
+    ghostBaseHp = GHOST_BASE_HP;
+    gameOver = false;
+    messageEl.textContent = '';
+    restartBtn.style.display = 'none';
+    player.x = 0;
+    player.y = Math.floor(GRID_SIZE / 2);
+    lastGhostHpIncreaseTime = performance.now();
+    drawGrid();
+  }
+
+  // Game loop variables
+  let lastGhostSpawn = 0;
+  const GHOST_SPAWN_INTERVAL = 1500; // Spawn ghost every 1.5 seconds
+
+  function gameLoop(timestamp) {
+    if(gameOver) return;
+    if(!lastGhostSpawn) lastGhostSpawn = timestamp;
+    if(!lastGhostHpIncreaseTime) lastGhostHpIncreaseTime = timestamp;
+
+    // Spawn ghosts every interval
+    if(timestamp - lastGhostSpawn > GHOST_SPAWN_INTERVAL) {
+      spawnGhost();
+      lastGhostSpawn = timestamp;
+    }
+
+    // Increase ghost base HP every 10 seconds survived
+    if(timestamp - lastGhostHpIncreaseTime > GHOST_HP_INCREASE_INTERVAL) {
+      ghostBaseHp += 5;
+      lastGhostHpIncreaseTime = timestamp;
+    }
+
+    moveGhosts();
+    moveBullets();
+    bulletsHitGhosts();
+    ghostsTouchPlayer();
+
+    drawGrid();
+
+    if(!gameOver) requestAnimationFrame(gameLoop);
+  }
+
+  // Key controls
+  window.addEventListener('keydown', e => {
+    if(gameOver) return;
+    switch(e.key) {
+      case 'ArrowUp':
+        movePlayer(0, -1);
+        break;
+      case 'ArrowDown':
+        movePlayer(0, 1);
+        break;
+      case 'ArrowLeft':
+        movePlayer(-1, 0);
+        break;
+      case 'ArrowRight':
+        movePlayer(1, 0);
+        break;
+      case ' ':
+        e.preventDefault();
+        playerShoot();
+        break;
+    }
+  });
+
+  restartBtn.addEventListener('click', () => {
+    restartGame();
+    requestAnimationFrame(gameLoop);
+  });
+
+  // Initialize game
+  createGrid();
+  loadHighScore();
+  updatePlayerHealthBar();
+  drawGrid();
+  requestAnimationFrame(gameLoop);
+
+})();
+</script>
+
+</body>
+</html>
