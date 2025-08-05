@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Ghost Hunter 6x6</title>
+<style>
+  body {
+    background: #111;
+    color: white;
+    font-family: monospace, monospace;
+    user-select: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  #game {
+    margin-top: 20px;
+    position: relative;
+    width: 300px; /* 6 cells * 50px */
+    height: 300px;
+    background: #222;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(6, 1fr);
+    gap: 2px;
+  }
+  .cell {
+    background: #333;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 40px;
+    position: relative;
+    overflow: visible;
+  }
+  #healthBarPlayer, #healthBarGhost {
+    width: 100px;
+    height: 10px;
+    background: #444;
+    border: 1px solid #666;
+    margin: 5px 0;
+    position: relative;
+    border-radius: 4px;
+  }
+  #healthPlayerFill, #healthGhostFill {
+    height: 100%;
+    background: #0f0;
+    width: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+  }
+  #healthGhostFill {
+    background: #f00;
+  }
+  #scoreBoard {
+    margin-top: 10px;
+    font-size: 16px;
+  }
+  #message {
+    margin-top: 10px;
+    font-size: 20px;
+    color: #ff4444;
+    min-height: 30px;
+  }
+  button {
+    margin-top: 10px;
+    padding: 12px 20px;
+    font-size: 24px;
+    cursor: pointer;
+    border-radius: 6px;
+    border: none;
+    background: #555;
+    color: white;
+    user-select: none;
+  }
+  button:active {
+    background: #888;
+  }
+  #controls {
+    margin-top: 15px;
+    display: flex;
+    gap: 15px;
+  }
+  @media (max-width: 600px) {
+    button {
+      padding: 16px 24px;
+      font-size: 28px;
+    }
+  }
+  .gun {
+    display: inline-block;
+    transform: scaleX(-1);
+  }
+  /* Smooth transition for ghosts and bullets */
+  .ghost, .bullet {
+    position: absolute;
+    transition: transform 0.4s linear;
+    font-size: 40px;
+    pointer-events: none;
+    user-select: none;
+  }
+  .player {
+    position: absolute;
+    font-size: 40px;
+    pointer-events: none;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<h1>Ghost Hunter</h1>
+<div id="healthBarPlayer" aria-label="Player Health">
+  <div id="healthPlayerFill"></div>
+</div>
+<div id="healthBarGhost" style="display:none;" aria-label="Ghost Health">
+  <div id="healthGhostFill"></div>
+</div>
+
+<div id="scoreBoard" aria-live="polite">
+  Score: <span id="score">0</span> | High Score: <span id="highScore">0</span>
+</div>
+
+<div id="message" role="alert" aria-live="assertive"></div>
+
+<div id="game" aria-label="Game Grid" role="grid" aria-rowcount="6" aria-colcount="6"></div>
+
+<div id="controls">
+  <button id="btnUp" aria-label="Move Up" title="Move Up">▲</button>
+  <button id="btnDown" aria-label="Move Down" title="Move Down">▼</button>
+  <button id="btnShoot" aria-label="Shoot" title="Shoot">🔫</button>
+</div>
+
+<button id="restartBtn" style="display:none;">Restart</button>
+
+<script>
+(() => {
+  const GRID_SIZE = 6;
+  const CELL_SIZE = 50; // pixels (for absolute positioning)
+  const PLAYER_HP_MAX = 25;
+  const GHOST_BASE_HP = 10;
+  const GUN_DAMAGE = 10;
+  const DAMAGE_ON_LINE_CROSS = 5;
+  const GHOST_HP_INCREASE_INTERVAL = 10000; // 10 seconds
+
+  const gameEl = document.getElementById('game');
+  const healthPlayerFill = document.getElementById('healthPlayerFill');
+  const healthGhostFill = document.getElementById('healthGhostFill');
+  const healthBarGhost = document.getElementById('healthBarGhost');
+  const scoreEl = document.getElementById('score');
+  const highScoreEl = document.getElementById('highScore');
+  const messageEl = document.getElementById('message');
+  const restartBtn = document.getElementById('restartBtn');
+
+  const btnUp = document.getElementById('btnUp');
+  const btnDown = document.getElementById('btnDown');
+  const btnShoot = document.getElementById('btnShoot');
+
+  // Player state
+  let player = {
+    x: 0,
+    y: Math.floor(GRID_SIZE / 2),
+    hp: PLAYER_HP_MAX,
+    element: null,
+    gunElement: null,
+  };
+
+  // Bullet objects: {id, x, y, element, progress}
+  let bullets = [];
+
+  // Ghost objects: only one ghost at a time
+  let ghost = null; // {x, y, hp, element, progress}
+
+  let ghostBaseHp = GHOST_BASE_HP;
+  let score = 0;
+  let highScore = 0;
+  let gameOver = false;
+  let lastGhostHpIncreaseTime = 0;
+  let lastGhostSpawnTime = 0;
+  const GHOST_SPAWN_INTERVAL = 2000; // 2 seconds delay before spawning next ghost
+
+  // Load high score
+  function loadHighScore() {
+    const hs = localStorage.getItem('ghostHunterHighScore');
+    if(hs !== null) highScore = parseInt(hs);
+    highScoreEl.textContent = highScore;
+  }
+  function saveHighScore() {
+    if(score > highScore) {
+      highScore = score;
+      localStorage.setItem('ghostHunterHighScore', highScore);
+      highScoreEl.textContent = highScore;
+    }
+  }
+
+  // Create grid cells (empty, no content)
+  function createGrid() {
+    gameEl.innerHTML = '';
+    for(let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+      const cell = document.createElement('div');
+      cell.classList.add('cell');
+      cell.style.width = CELL_SIZE + 'px';
+      cell.style.height = CELL_SIZE + 'px';
+      gameEl.appendChild(cell);
+    }
+  }
+
+  // Helper: position in px for absolute positioning
+  function positionToPixels(x, y) {
+    return {
+      left: x * CELL_SIZE,
+      top: y * CELL_SIZE,
+    };
+  }
+
+  // Create or update player and gun elements
+  function drawPlayer() {
+    if(!player.element) {
+      player.element = document.createElement('div');
+      player.element.className = 'player';
+      player.element.textContent = '😀';
+      gameEl.appendChild(player.element);
+
+      player.gunElement = document.createElement('div');
+      player.gunElement.className = 'player gun';
+      player.gunElement.textContent = '🔫';
+      gameEl.appendChild(player.gunElement);
+    }
+    let pos = positionToPixels(player.x, player.y);
+    player.element.style.transform = `translate(${pos.left}px, ${pos.top}px)`;
+    // Gun to the right of player (x+1)
+    let gunX = player.x + 1;
+    let gunY = player.y;
+    if(gunX >= GRID_SIZE) gunX = player.x; // keep gun inside grid if at right edge
+    let gunPos = positionToPixels(gunX, gunY);
+    player.gunElement.style.transform = `translate(${gunPos.left}px, ${gunPos.top}px)`;
+  }
+
+  // Create bullet element and add to bullets array
+  function createBullet(x, y) {
+    const bulletEl = document.createElement('div');
+    bulletEl.className = 'bullet';
+    bulletEl.textContent = '-';
+    gameEl.appendChild(bulletEl);
+    bullets.push({
+      x, y,
+      element: bulletEl,
+      progress: 0 // progress for smooth animation
+    });
+    updateBulletPosition(bullets.length -1);
+  }
+
+  // Update bullet position smoothly
+  function updateBulletPosition(i) {
+    const b = bullets[i];
+    let pos = positionToPixels(b.x, b.y);
+    b.element.style.transform = `translate(${pos.left}px, ${pos.top}px)`;
+  }
+
+  // Remove bullet
+  function removeBullet(i) {
+    gameEl.removeChild(bullets[i].element);
+    bullets.splice(i, 1);
+  }
+
+  // Create ghost element
+  function createGhost(x, y, hp) {
+    const ghostEl = document.createElement('div');
+    ghostEl.className = 'ghost';
+    ghostEl.textContent = '👻';
+    gameEl.appendChild(ghostEl);
+    return {x, y, hp, element: ghostEl, progress: 0};
+  }
+
+  // Update ghost position smoothly
+  function updateGhostPosition() {
+    if(!ghost) return;
+    let pos = positionToPixels(ghost.x, ghost.y);
+    ghost.element.style.transform = `translate(${pos.left}px, ${pos.top}px)`;
+  }
+
+  // Remove ghost element
+  function removeGhost() {
+    if(ghost) {
+      gameEl.removeChild(ghost.element);
+      ghost = null;
+    }
+  }
+
+  // Update health bars
+  function updatePlayerHealthBar() {
+    let percent = (player.hp / PLAYER_HP_MAX) * 100;
+    healthPlayerFill.style.width = percent + '%';
+    if(percent > 60) healthPlayerFill.style.backgroundColor = '#0f0';
+    else if(percent > 30) healthPlayerFill.style.backgroundColor = '#ff0';
+    else healthPlayerFill.style.backgroundColor = '#f00';
+  }
+  function updateGhostHealthBar() {
+    if(ghost) {
+      healthBarGhost.style.display = 'block';
+      let percent = Math.min(100, (ghost.hp / ghostBaseHp) * 100);
+      healthGhostFill.style.width = percent + '%';
+    } else {
+      healthBarGhost.style.display = 'none';
+    }
+  }
+
+  // Spawn ghost if none and interval passed
+  function trySpawnGhost(time) {
+    if(ghost) return;
+    if(time - lastGhostSpawnTime < GHOST_SPAWN_INTERVAL) return;
+    const y = Math.floor(Math.random() * GRID_SIZE);
+    ghost = createGhost(GRID_SIZE - 1, y, ghostBaseHp);
+    lastGhostSpawnTime = time;
+  }
+
+  // Move ghost left smoothly with speed control
+  function moveGhost(delta) {
+    if(!ghost) return;
+
+    ghost.progress += delta * 0.0025; // Adjust speed (lower is slower)
+    if(ghost.progress >= 1) {
+      ghost.x -= 1;
+      ghost.progress = 0;
+    }
+    if(ghost.x < 0) {
+      removeGhost();
+    }
+  }
+
+  // Move bullets right smoothly with speed control
+  function moveBullets(delta) {
+    for(let i = bullets.length -1; i >= 0; i--) {
+      let b = bullets[i];
+      b.progress += delta * 0.0035; // Bullets slower than ghosts
+      if(b.progress >= 1) {
+        b.x += 1;
+        b.progress = 0;
+        if(b.x >= GRID_SIZE) {
+          // Remove bullet out of bounds
+          gameEl.removeChild(b.element);
+          bullets.splice(i,1);
+          continue;
+        }
+      }
+    }
+  }
+
+  // Update positions of bullets and ghost visually
+  function updatePositions() {
+    // Bullets
+    bullets.forEach(b => {
+      // Calculate partial progress for smooth move
+      const basePos = positionToPixels(b.x, b.y);
+      const prevX = b.x - (b.progress >= 1 ? 1 : 0);
+      const prevPos = positionToPixels(prevX, b.y);
+      const interpX = prevPos.left + (basePos.left - prevPos.left) * b.progress;
+      b.element.style.transform = `translate(${interpX}px, ${basePos.top}px)`;
+    });
+    // Ghost
+    if(ghost) {
+      const basePos = positionToPixels(ghost.x, ghost.y);
+      const prevX = ghost.x + (ghost.progress >= 1 ? 1 : 0);
+      const prevPos = positionToPixels(prevX, ghost.y);
+      const interpX = prevPos.left + (basePos.left - prevPos.left) * ghost.progress;
+      ghost.element.style.transform = `translate(${interpX}px, ${basePos.top}px)`;
+    }
+    // Player and gun
+    drawPlayer();
+  }
+
+  // Check bullet hits ghost
+  function checkBulletHits() {
+    if(!ghost) return;
+    for(let i = bullets.length -1; i >= 0; i--) {
+      let b = bullets[i];
+      // Consider bullet 'at' ghost if bullet x equals ghost x and same y, and progress > 0.5 to count as hit mid-move
+      if(b.y === ghost.y) {
+        const bulletXReal = b.x + b.progress;
+        const ghostXReal = ghost.x + ghost.progress;
+        if(Math.abs(bulletXReal - ghostXReal) < 0.4) {
+          // Hit detected
+          ghost.hp -= GUN_DAMAGE;
+          updateGhostHealthBar();
+
+          // Show explosion animation briefly
+          const explosion = document.createElement('div');
+          explosion.className = 'bullet';
+          explosion.textContent = '💥';
+          gameEl.appendChild(explosion);
+          const pos = positionToPixels(Math.round(ghost.x), ghost.y);
+          explosion.style.transform = `translate(${pos.left}px, ${pos.top}px)`;
+          setTimeout(() => {
+            gameEl.removeChild(explosion);
+          }, 200);
+
+          // Remove bullet
+          gameEl.removeChild(b.element);
+          bullets.splice(i,1);
+
+          if(ghost.hp <= 0) {
+            removeGhost();
+            score++;
+            scoreEl.textContent = score;
+            saveHighScore();
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Check if ghost crossed player's vertical line (same column or left of player.x+1)
+  function checkGhostCrossLine() {
+    if(!ghost) return;
+    // If ghost's x + progress is less or equal player's x + 1 (gun position),
+    // and ghost is still on grid, and ghost is alive, player loses hp once per crossing
+    if(ghost.x + ghost.progress <= player.x + 1) {
+      // Reduce HP and remove ghost to prevent repeated damage
+      player.hp -= DAMAGE_ON_LINE_CROSS;
+      updatePlayerHealthBar();
+      removeGhost();
+      if(player.hp <= 0) {
+        gameOver = true;
+        endGame();
+      }
+    }
+  }
+
+  // Move player up/down
+  function movePlayer(dy) {
+    if(gameOver) return;
+    let newY = player.y + dy;
+    if(newY >= 0 && newY < GRID_SIZE) {
+      player.y = newY;
+      drawPlayer();
+    }
+  }
+
+  // Player shoot bullet
+  function playerShoot() {
+    if(gameOver) return;
+    let bulletX = player.x + 2;
+    let bulletY = player.y;
+    if(bulletX < GRID_SIZE) {
+      createBullet(bulletX, bulletY);
+    }
+  }
+
+  // End game
+  function endGame() {
+    saveHighScore();
+    messageEl.textContent = `Game Over! Score: ${score} | High Score: ${highScore}`;
+    restartBtn.style.display = 'inline-block';
+  }
+
+  // Restart game
+  function restartGame() {
+    player.hp = PLAYER_HP_MAX;
+    updatePlayerHealthBar();
+    score = 0;
+    scoreEl.textContent = score;
+    ghostBaseHp = GHOST_BASE_HP;
+    gameOver = false;
+    messageEl.textContent = '';
+    restartBtn.style.display = 'none';
+    player.x = 0;
+    player.y = Math.floor(GRID_SIZE / 2);
+
+    // Remove bullets & ghosts elements
+    bullets.forEach(b => gameEl.removeChild(b.element));
+    bullets = [];
+    removeGhost();
+
+    lastGhostHpIncreaseTime = performance.now();
+    lastGhostSpawnTime = performance.now();
+
+    drawPlayer();
+  }
+
+  // Game loop with smooth animation
+  let lastTimestamp = 0;
+  function gameLoop(timestamp) {
+    if(!lastTimestamp) lastTimestamp = timestamp;
+    let delta = timestamp - lastTimestamp;
+    lastTimestamp = timestamp;
+    if(gameOver) return;
+
+    trySpawnGhost(timestamp);
+
+    // Increase ghost HP every 10 seconds survived
+    if(timestamp - lastGhostHpIncreaseTime > GHOST_HP_INCREASE_INTERVAL) {
+      ghostBaseHp += 5;
+      lastGhostHpIncreaseTime = timestamp;
+    }
+
+    moveGhost(delta);
+    moveBullets(delta);
+    updatePositions();
+    checkBulletHits();
+    checkGhostCrossLine();
+
+    if(!gameOver) {
+      requestAnimationFrame(gameLoop);
+    }
+  }
+
+  // Keyboard controls
+  window.addEventListener('keydown', e => {
+    if(gameOver) return;
+    switch(e.key) {
+      case 'ArrowUp':
+        movePlayer(-1);
+        break;
+      case 'ArrowDown':
+        movePlayer(1);
+        break;
+      case ' ':
+        e.preventDefault();
+        playerShoot();
+        break;
+    }
+  });
+
+  // Button controls
+  btnUp.addEventListener('click', () => movePlayer(-1));
+  btnDown.addEventListener('click', () => movePlayer(1));
+  btnShoot.addEventListener('click', () => playerShoot());
+
+  restartBtn.addEventListener('click', () => {
+    restartGame();
+    requestAnimationFrame(gameLoop);
+  });
+
+  // Initialize game
+  createGrid();
+  loadHighScore();
+  updatePlayerHealthBar();
+  updateGhostHealthBar();
+  restartGame();
+
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+
+</body>
+</html>
