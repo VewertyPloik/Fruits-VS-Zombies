@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+<title>Fruits vs Zombies</title>
+<style>
+  :root{
+    --bg:#e6fbff;
+    --panel:#ffffffcc;
+    --accent:#2b9fff;
+    --text:#123;
+  }
+  html,body{height:100%;margin:0;font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
+  body{
+    background: linear-gradient(180deg,#d0f0ff 0%, #e9fffb 100%);
+    display:flex;align-items:center;justify-content:center;padding:12px;
+  }
+  #gameWrap{width:100%;max-width:480px;background:var(--panel);border-radius:14px;box-shadow:0 6px 20px rgba(0,0,0,0.15);overflow:hidden}
+  header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(90deg,#ffffffaa,#ffffffcc);}
+  header .title{font-weight:700;color:var(--text);display:flex;gap:8px;align-items:center}
+  header .stats{font-size:14px;color:#0b2540;display:flex;gap:10px;align-items:center}
+  main{padding:8px}
+  #homeScreen,#endScreen{display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;padding:18px}
+  .btn{background:var(--accent);color:white;padding:10px 14px;border-radius:10px;font-weight:700;border:none;box-shadow:0 4px 8px rgba(0,0,0,0.12)}
+  .smallBtn{padding:6px 8px;border-radius:8px;background:#0ea5a5;color:white;border:none}
+  .hudRow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .board{width:100%;aspect-ratio:4/3;background:linear-gradient(#bff0ff,#dffcff);border-radius:10px;position:relative;touch-action:none;overflow:hidden}
+  .grid{position:absolute;inset:10px;display:grid;grid-template-rows:repeat(3,1fr);grid-template-columns:repeat(4,1fr);gap:6px;z-index:1}
+  .cell{background:rgba(255,255,255,0.35);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:28px;user-select:none}
+  .shop{display:flex;gap:6px;margin-top:10px;overflow:auto;padding-bottom:6px}
+  .shop button{flex:0 0 auto;padding:8px;border-radius:10px;border:1px solid rgba(0,0,0,0.06);background:white}
+  .infoBar{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-weight:600}
+  .topHud{display:flex;gap:8px;align-items:center}
+  .waterCoin{display:inline-flex;align-items:center;gap:6px;background:#e6f8ff;padding:6px 8px;border-radius:12px}
+  #canvasOverlay{position:absolute;inset:10px;pointer-events:auto;z-index:2}
+  .centerText{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;pointer-events:none;z-index:3}
+  footer{padding:8px;display:flex;gap:8px;align-items:center;justify-content:center;background:linear-gradient(90deg,#ffffffcc,#ffffffaa)}
+  .shop .selected{outline:3px solid rgba(43,159,255,0.25)}
+  .smallMuted{font-size:12px;color:#345}
+  @media (min-width:520px){ #gameWrap{max-width:560px} }
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <header>
+    <div class="title">🍓 Fruits vs Zombies</div>
+    <div class="stats">
+      <div id="zombiesLeft">Zombies: 0</div>
+      <div id="waveInfo">Wave: 1 / 15</div>
+      <div id="healthInfo">Health: 5</div>
+    </div>
+  </header>
+
+  <main>
+    <div id="homeScreen">
+      <h2>🍉 Fruits vs Zombies</h2>
+      <div class="smallMuted">Tap tiles to place fruits. Tap falling drops to collect water 💧</div>
+      <div style="display:flex;gap:10px;margin-top:10px;">
+        <button id="btnContinue" class="btn" style="background:#38bdf8">Continue Saved</button>
+        <button id="btnNew" class="btn">New Game</button>
+      </div>
+      <div style="margin-top:12px">High Score (wave): <strong id="highScoreDisplay">0</strong></div>
+    </div>
+
+    <div id="gameArea" style="display:none">
+      <div class="infoBar">
+        <div class="topHud">
+          <div id="message" style="font-weight:700;color:#154">Ready</div>
+        </div>
+        <div class="waterCoin">💧 <span id="waterCoins">0</span></div>
+      </div>
+
+      <div class="board" id="board">
+        <div class="grid" id="grid"></div>
+        <canvas id="canvasOverlay"></canvas>
+        <div class="centerText" id="centerText" style="display:none"></div>
+      </div>
+
+      <div class="shop" id="shop">
+        <button data-type="banana" class="plantBtn">🍌 Banana<br><small>10 💧</small></button>
+        <button data-type="lemon" class="plantBtn">🍋 Lemon<br><small>8 💧</small></button>
+        <button data-type="watermelon" class="plantBtn">🍉 Watermelon<br><small>5 💧</small></button>
+        <button data-type="blueberry" class="plantBtn">🫐 Blueberry<br><small>25 💧</small></button>
+        <button id="erase" class="plantBtn">✖ Remove</button>
+      </div>
+
+      <div style="display:flex;justify-content:center;margin-top:8px;gap:8px">
+        <button id="pauseBtn" class="smallBtn">Pause</button>
+        <button id="saveBtn" class="smallBtn">Save</button>
+        <button id="homeBtn" class="smallBtn">Home</button>
+      </div>
+    </div>
+
+    <div id="endScreen" style="display:none">
+      <h2 id="endTitle">You Died</h2>
+      <div id="endMsg"></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="retry" class="btn">Retry</button>
+        <button id="backHome" class="btn" style="background:#94a3b8">Home</button>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="smallMuted">Made for iPhone. Tap shop then grid to place.</div>
+  </footer>
+</div>
+
+<script>
+/* ======= Constants & State ======= */
+const ROWS = 3, COLS = 4;
+const GRID_SAVE_KEY = 'fvz_save_v1';
+const HIGH_KEY = 'fvz_high_v1';
+const MAX_WAVES = 15;
+
+const PLANTS = {
+  banana: { name:'Banana Shooter', cost:10, emoji:'🍌', shootInterval:3500, damage:5 },
+  lemon: { name:'Lemon Bomb', cost:8, emoji:'🍋', explodeDamage:25, explodeRange:1 },
+  watermelon: { name:'Watermelon', cost:5, emoji:'🍉', produceInterval:4000, produce:1 },
+  blueberry: { name:'Blueberry Shooter', cost:25, emoji:'🫐', shootInterval:2500, damage:10 }
+};
+
+let state = {
+  running:false,
+  paused:false,
+  wave:1,
+  waterCoins:20,
+  health:5,
+  zombiesToSpawn:0,
+  zombies:[],
+  projectiles:[],
+  rain:[],
+  grid: Array(ROWS).fill(0).map(()=>Array(COLS).fill(null)), // stores plantType or null
+  selectedPlant: null,
+  lastTime:0,
+  lastRainSpawn:0,
+  spawnTimer:0,
+  spawnInterval:1000,
+  highScore:0
+};
+
+/* ======= DOM ======= */
+const els = {
+  homeScreen: document.getElementById('homeScreen'),
+  btnContinue: document.getElementById('btnContinue'),
+  btnNew: document.getElementById('btnNew'),
+  highScoreDisplay: document.getElementById('highScoreDisplay'),
+  gameArea: document.getElementById('gameArea'),
+  gridContainer: document.getElementById('grid'),
+  board: document.getElementById('board'),
+  canvas: document.getElementById('canvasOverlay'),
+  zombiesLeft: document.getElementById('zombiesLeft'),
+  waveInfo: document.getElementById('waveInfo'),
+  healthInfo: document.getElementById('healthInfo'),
+  waterCoins: document.getElementById('waterCoins'),
+  shop: document.getElementById('shop'),
+  message: document.getElementById('message'),
+  centerText: document.getElementById('centerText'),
+  endScreen: document.getElementById('endScreen'),
+  endTitle: document.getElementById('endTitle'),
+  endMsg: document.getElementById('endMsg'),
+  retry: document.getElementById('retry'),
+  backHome: document.getElementById('backHome'),
+  pauseBtn: document.getElementById('pauseBtn'),
+  saveBtn: document.getElementById('saveBtn'),
+  homeBtn: document.getElementById('homeBtn')
+};
+
+/* ======= Canvas Setup ======= */
+const canvas = els.canvas;
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){
+  const rect = els.board.getBoundingClientRect();
+  canvas.width = Math.max(100, rect.width - 20);
+  canvas.height = Math.max(100, rect.height - 20);
+}
+window.addEventListener('resize', resizeCanvas);
+
+/* ======= UI Grid Build ======= */
+function buildGridUI(){
+  els.gridContainer.innerHTML = '';
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r; cell.dataset.c = c;
+      cell.addEventListener('pointerdown', onCellTap);
+      els.gridContainer.appendChild(cell);
+    }
+  }
+  renderGrid();
+}
+
+function renderGrid(){
+  const children = els.gridContainer.children;
+  for(let i=0;i<children.length;i++){
+    const r = Math.floor(i/COLS), c = i%COLS;
+    const plant = state.grid[r][c];
+    children[i].textContent = plant ? PLANTS[plant].emoji : '';
+  }
+}
+
+/* ======= Save/Load ======= */
+function saveProgress(){
+  const toSave = {
+    wave: state.wave,
+    waterCoins: state.waterCoins,
+    health: state.health,
+    grid: state.grid,
+    highScore: state.highScore
+  };
+  localStorage.setItem(GRID_SAVE_KEY, JSON.stringify(toSave));
+  localStorage.setItem(HIGH_KEY, String(state.highScore));
+  showMsg('Saved');
+}
+function loadProgress(){
+  const raw = localStorage.getItem(GRID_SAVE_KEY);
+  if(!raw) return null;
+  try { return JSON.parse(raw); } catch(e){ return null; }
+}
+function loadHigh(){
+  const h = parseInt(localStorage.getItem(HIGH_KEY) || '0', 10) || 0;
+  state.highScore = h;
+  els.highScoreDisplay.textContent = state.highScore;
+}
+
+/* ======= Buttons ======= */
+els.btnContinue.addEventListener('click', ()=>{
+  const s = loadProgress();
+  if(!s){ alert('No saved game'); return; }
+  state.wave = s.wave || 1;
+  state.waterCoins = s.waterCoins || 0;
+  state.health = s.health || 5;
+  state.grid = s.grid || state.grid;
+  startGame(false);
+});
+els.btnNew.addEventListener('click', ()=>{ resetAll(); startGame(true); });
+
+els.retry.addEventListener('click', ()=>{ resetForRetry(); startGame(true); });
+els.backHome.addEventListener('click', goHome);
+els.pauseBtn.addEventListener('click', ()=>{ state.paused = !state.paused; els.pauseBtn.textContent = state.paused ? 'Resume' : 'Pause'; });
+els.saveBtn.addEventListener('click', saveProgress);
+els.homeBtn.addEventListener('click', ()=>{ if(confirm('Save and go home?')){ saveProgress(); goHome(); } });
+
+/* ======= Shop Selection ======= */
+els.shop.addEventListener('click', (ev)=>{
+  const btn = ev.target.closest('button');
+  if(!btn) return;
+  if(btn.id === 'erase'){ state.selectedPlant = 'erase'; highlightShop(); return; }
+  const type = btn.dataset.type;
+  state.selectedPlant = type;
+  highlightShop();
+});
+function highlightShop(){
+  document.querySelectorAll('.shop button').forEach(b=>b.classList.remove('selected'));
+  if(!state.selectedPlant) return;
+  const btn = document.querySelector(`.shop button[data-type="${state.selectedPlant}"]`);
+  if(btn) btn.classList.add('selected');
+  if(state.selectedPlant === 'erase') document.getElementById('erase').classList.add('selected');
+}
+
+/* ======= Cell Placement ======= */
+function onCellTap(ev){
+  ev.preventDefault();
+  if(!state.running || state.paused) return;
+  const r = +this.dataset.r, c = +this.dataset.c;
+  if(state.selectedPlant === 'erase'){
+    state.grid[r][c] = null;
+    renderGrid();
+    return;
+  }
+  if(!state.selectedPlant){ showMsg('Select a plant'); return; }
+  const plant = PLANTS[state.selectedPlant];
+  if(state.grid[r][c]){ showMsg('Cell occupied'); return; }
+  if(state.waterCoins < plant.cost){ showMsg('Not enough water'); return; }
+  state.waterCoins -= plant.cost;
+  state.grid[r][c] = state.selectedPlant;
+  renderGrid();
+  showMsg(`${plant.name} placed`);
+}
+
+/* ======= Utility ======= */
+function showMsg(txt){
+  els.message.textContent = txt;
+  clearTimeout(showMsg._t);
+  showMsg._t = setTimeout(()=>{ els.message.textContent = ''; }, 2000);
+}
+
+/* ======= Spawn & Wave Logic ======= */
+function zombieStatsForWave(w){
+  const hp = 5 + 2*(w-1);
+  const baseSpeed = 0.035; // fraction of board width per second-ish; we'll convert
+  const speed = baseSpeed * Math.pow(1.08, w-1);
+  return { hp, speed };
+}
+
+function startWave(){
+  // number of zombies: base 5 + wave*1.5 rounded
+  state.zombiesToSpawn = Math.max(3, 5 + Math.floor(state.wave * 1.5));
+  state.spawnTimer = 0;
+  showMsg(`Wave ${state.wave} start`);
+}
+
+/* ======= Spawn a single zombie ======= */
+function spawnZombie(){
+  const stats = zombieStatsForWave(state.wave);
+  // spawn at right edge in random row
+  const row = Math.floor(Math.random()*ROWS);
+  // x anchored to canvas width
+  const pos = { row, x: canvas.width + 20, y: (row + 0.5) * ((canvas.height) / ROWS), hp: stats.hp, maxHp: stats.hp, speed: stats.speed * canvas.width }; // speed in px/s ~
+  // random small offset to y so not always exact center
+  pos.y += (Math.random()-0.5) * 10;
+  state.zombies.push(pos);
+}
+
+/* ======= Rain Drops ======= */
+function spawnRain(){
+  const x = Math.random() * canvas.width;
+  state.rain.push({ x, y: -10, vy: 60 + Math.random()*30, collected:false });
+}
+
+/* ======= Projectiles ======= */
+function fireProjectile(fromX, fromY, targetZ, dmg, color='yellow'){
+  state.projectiles.push({ x: fromX, y: fromY, target: targetZ, dmg, color, speed: 300 }); // px/s
+}
+
+/* ======= Game Start/Stop ======= */
+function startGame(isNew){
+  els.homeScreen.style.display = 'none';
+  els.gameArea.style.display = 'block';
+  els.endScreen.style.display = 'none';
+  resizeCanvas();
+  buildGridUI();
+  loadHigh();
+  renderGrid();
+  els.waterCoins.textContent = state.waterCoins;
+  els.healthInfo.textContent = 'Health: ' + state.health;
+  els.waveInfo.textContent = `Wave: ${state.wave} / ${MAX_WAVES}`;
+  state.running = true;
+  state.paused = false;
+  els.pauseBtn.textContent = 'Pause';
+  if(isNew){
+    // keep grid? we reset to empty for new game
+    state.grid = Array(ROWS).fill(0).map(()=>Array(COLS).fill(null));
+    renderGrid();
+    state.zombies = []; state.projectiles = []; state.rain = [];
+    state.lastTime = performance.now();
+    state.lastRainSpawn = performance.now();
+  }
+  startWave();
+  requestAnimationFrame(loop);
+}
+
+function resetAll(){
+  state.wave = 1;
+  state.waterCoins = 20;
+  state.health = 5;
+  state.grid = Array(ROWS).fill(0).map(()=>Array(COLS).fill(null));
+  state.zombies = []; state.projectiles = []; state.rain = [];
+  state.selectedPlant = null;
+  saveHigh(0);
+}
+function resetForRetry(){
+  state.wave = 1;
+  state.waterCoins = 20;
+  state.health = 5;
+  state.grid = Array(ROWS).fill(0).map(()=>Array(COLS).fill(null));
+  state.zombies = []; state.projectiles = []; state.rain = [];
+  state.selectedPlant = null;
+}
+
+/* ======= High Score ======= */
+function saveHigh(val){
+  if(val > state.highScore){ state.highScore = val; localStorage.setItem(HIGH_KEY, String(val)); }
+  els.highScoreDisplay.textContent = state.highScore;
+}
+
+/* ======= Game Over / Win ======= */
+function gameOver(won){
+  state.running = false;
+  els.gameArea.style.display = 'none';
+  els.endScreen.style.display = 'flex';
+  if(won){
+    els.endTitle.textContent = 'YOU WON!';
+    els.endMsg.innerHTML = `You beat all ${MAX_WAVES} waves! Wave reached: ${state.wave}.<br>High score: ${state.highScore}`;
+  } else {
+    els.endTitle.textContent = 'You Died';
+    els.endMsg.innerHTML = `You made it to wave ${state.wave}.<br>High score: ${state.highScore}`;
+  }
+  // update high score
+  saveHigh(state.wave);
+  localStorage.setItem(GRID_SAVE_KEY, JSON.stringify({ wave: state.wave, waterCoins: state.waterCoins, health: state.health, grid: state.grid }));
+}
+
+/* ======= Loop ======= */
+function loop(ts){
+  if(!state.running) return;
+  if(state.paused){
+    state.lastTime = ts;
+    requestAnimationFrame(loop);
+    return;
+  }
+  if(!state.lastTime) state.lastTime = ts;
+  const dt = (ts - state.lastTime) / 1000; // seconds
+  state.lastTime = ts;
+
+  // spawn rain every 4s
+  if(ts - state.lastRainSpawn > 4000){
+    spawnRain();
+    state.lastRainSpawn = ts;
+  }
+
+  // spawn zombies progressively
+  if(state.zombiesToSpawn > 0){
+    state.spawnTimer += dt;
+    if(state.spawnTimer > (state.spawnInterval/1000)){
+      spawnZombie();
+      state.zombiesToSpawn--;
+      state.spawnTimer = 0;
+    }
+  }
+
+  // update rain
+  for(let i = state.rain.length -1; i >=0; i--){
+    const d = state.rain[i];
+    d.y += d.vy * dt;
+    if(d.y > canvas.height + 30) state.rain.splice(i,1);
+  }
+
+  // update projectiles
+  for(let i = state.projectiles.length -1; i>=0; i--){
+    const p = state.projectiles[i];
+    if(!p.target || p.target.hp <= 0){
+      state.projectiles.splice(i,1); continue;
+    }
+    // move toward target position
+    const dx = p.target.x - p.x, dy = p.target.y - p.y;
+    const dist = Math.sqrt(dx*dx+dy*dy);
+    const step = p.speed * dt;
+    if(dist <= step){
+      // hit
+      p.target.hp -= p.dmg;
+      state.projectiles.splice(i,1);
+      if(p.target.hp <= 0){
+        // remove zombie later in zombie loop
+      }
+    } else {
+      p.x += dx/dist * step;
+      p.y += dy/dist * step;
+    }
+  }
+
+  // update zombies
+  for(let i = state.zombies.length -1; i>=0; i--){
+    const z = state.zombies[i];
+    // move left by speed*dt (speed stored as px/s)
+    z.x -= z.speed * dt;
+    // if reaches left edge -> damage
+    if(z.x < -20){
+      state.zombies.splice(i,1);
+      state.health -= 1;
+      els.healthInfo.textContent = 'Health: ' + state.health;
+      if(state.health <= 0){ gameOver(false); return; }
+    }
+  }
+
+  // remove dead zombies and reward nothing (could add coin)
+  for(let i = state.zombies.length -1; i>=0; i--){
+    if(state.zombies[i].hp <= 0) state.zombies.splice(i,1);
+  }
+
+  // plant actions
+  handlePlants(ts);
+
+  // collisions: lemon bomb proximity => explode
+  handleLemonExplosions();
+
+  // projectiles and zombie collision handled when projectile reaches target
+
+  // check end-of-wave: if no zombies in world and none left to spawn
+  if(state.zombies.length === 0 && state.zombiesToSpawn === 0){
+    // wave cleared
+    if(state.wave >= MAX_WAVES){
+      // win
+      saveHigh(state.wave);
+      gameOver(true);
+      return;
+    } else {
+      state.wave++;
+      saveHigh(Math.max(state.highScore, state.wave));
+      els.waveInfo.textContent = `Wave: ${state.wave} / ${MAX_WAVES}`;
+      // give a small coin bonus between waves
+      state.waterCoins += 5;
+      startWave();
+    }
+  }
+
+  // render HUD & canvas
+  els.zombiesLeft.textContent = 'Zombies: ' + (state.zombies.length + state.zombiesToSpawn);
+  els.waterCoins.textContent = state.waterCoins;
+  els.waveInfo.textContent = `Wave: ${state.wave} / ${MAX_WAVES}`;
+  els.healthInfo.textContent = 'Health: ' + state.health;
+
+  draw();
+
+  requestAnimationFrame(loop);
+}
+
+/* ======= Plant Behavior ======= */
+const plantTimers = {}; // key "r,c" -> lastActionTime in ms
+
+function handlePlants(ts){
+  // ts is high-res time in ms
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const type = state.grid[r][c];
+      if(!type) continue;
+      const key = `${r},${c}`;
+      const plant = PLANTS[type];
+      if(!plantTimers[key]) plantTimers[key] = ts;
+      // Shooting plants
+      if(plant.shootInterval){
+        if(ts - plantTimers[key] >= plant.shootInterval){
+          // find nearest zombie in the same row (or any) to target
+          let target = null;
+          let bestDist = Infinity;
+          for(const z of state.zombies){
+            // choose within same row by y proximity or any
+            const rowY = (r + 0.5) * (canvas.height / ROWS);
+            const dy = Math.abs(z.y - rowY);
+            if(dy < (canvas.height/ROWS)/2 + 10){
+              const dist = z.x; // prefer closest to left (lower x)
+              if(dist < bestDist){ bestDist = dist; target = z; }
+            }
+          }
+          // if no target in row, optionally target any zombie
+          if(!target && state.zombies.length) target = state.zombies[Math.floor(Math.random()*state.zombies.length)];
+          if(target){
+            // from cell center
+            const pos = cellCenter(r,c);
+            fireProjectile(pos.x, pos.y, target, plant.damage, type==='blueberry' ? 'blue' : 'yellow');
+          }
+          plantTimers[key] = ts;
+        }
+      }
+      // Watermelon produce water coins
+      if(plant.produceInterval){
+        if(ts - plantTimers[key] >= plant.produceInterval){
+          state.waterCoins += plant.produce;
+          plantTimers[key] = ts;
+        }
+      }
+      // Lemon bombs do no periodic action; they explode when zombie near
+    }
+  }
+}
+
+/* ======= Lemon Explosions ======= */
+function handleLemonExplosions(){
+  // For each lemon on grid, check zombies within explodeRange (grid distance)
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(state.grid[r][c] !== 'lemon') continue;
+      // compute cell center and check zombies within 1 grid cell (distance)
+      const center = cellCenter(r,c);
+      for(let i=state.zombies.length-1;i>=0;i--){
+        const z = state.zombies[i];
+        // convert z.x,z.y to row/col approx
+        // compute grid cell rectangle centers and measure grid-distance
+        const zRow = Math.floor((z.y / canvas.height) * ROWS);
+        const zCol = Math.floor((z.x / canvas.width) * COLS);
+        const dr = Math.abs(zRow - r), dc = Math.abs(zCol - c);
+        if(Math.max(dr,dc) <= 1){
+          // explode: damage nearby zombies within 1 cell radius (euclidean on grid)
+          const explodeRangePx = Math.max(canvas.width/COLS, canvas.height/ROWS) * 1.1;
+          for(let j=state.zombies.length-1;j>=0;j--){
+            const z2 = state.zombies[j];
+            const dx = z2.x - center.x, dy = z2.y - center.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if(dist <= explodeRangePx){
+              z2.hp -= PLANTS.lemon.explodeDamage;
+            }
+          }
+          // remove the lemon itself
+          state.grid[r][c] = null;
+          renderGrid();
+          break;
+        }
+      }
+    }
+  }
+}
+
+/* ======= Utilities for positions & drawing ======= */
+function cellCenter(r,c){
+  const cellW = canvas.width / COLS;
+  const cellH = canvas.height / ROWS;
+  const x = (c + 0.5) * cellW;
+  const y = (r + 0.5) * cellH;
+  return { x, y, w: cellW, h: cellH };
+}
+
+function draw(){
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // draw grid lines lightly
+  ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+  for(let i=1;i<COLS;i++){
+    const x = i * canvas.width / COLS;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+  }
+  for(let i=1;i<ROWS;i++){
+    const y = i * canvas.height / ROWS;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+  }
+
+  // draw rain drops
+  for(const d of state.rain){
+    ctx.beginPath();
+    ctx.fillStyle = '#6ec6ff';
+    ctx.ellipse(d.x, d.y, 8, 12, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.font = '10px sans-serif';
+    ctx.fillText('💧', d.x-6, d.y+4);
+  }
+
+  // draw plants with emoji text
+  ctx.font = Math.max(18, Math.round(canvas.width / 12)) + 'px serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const type = state.grid[r][c];
+      if(!type) continue;
+      const pos = cellCenter(r,c);
+      ctx.fillText(PLANTS[type].emoji, pos.x, pos.y + 2);
+    }
+  }
+
+  // draw zombies (simple rectangles with emoji)
+  for(const z of state.zombies){
+    // body
+    const w = canvas.width / 10;
+    const h = canvas.height / (ROWS*1.5);
+    ctx.fillStyle = '#7a8c8f';
+    ctx.fillRect(z.x - w/2, z.y - h/2, w, h);
+    // emoji face
+    ctx.font = Math.max(16, Math.round(canvas.width / 20)) + 'px serif';
+    ctx.fillText('🧟', z.x, z.y + 2);
+    // hp bar
+    ctx.fillStyle = 'red';
+    const hpW = Math.max(0, (z.hp / z.maxHp)) * w;
+    ctx.fillRect(z.x - w/2, z.y - h/2 - 8, hpW, 4);
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.strokeRect(z.x - w/2, z.y - h/2 - 8, w, 4);
+  }
+
+  // draw projectiles
+  for(const p of state.projectiles){
+    ctx.beginPath();
+    ctx.fillStyle = p.color === 'blue' ? '#3b82f6' : '#facc15';
+    ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+/* ======= Pointer Handling for rain collection ======= */
+canvas.addEventListener('pointerdown', (ev)=>{
+  const rect = canvas.getBoundingClientRect();
+  const x = (ev.clientX - rect.left);
+  const y = (ev.clientY - rect.top);
+  // check rain drops
+  for(let i=state.rain.length-1;i>=0;i--){
+    const d = state.rain[i];
+    const dx = d.x - x, dy = d.y - y;
+    if(Math.sqrt(dx*dx+dy*dy) < 20){
+      // collect
+      state.waterCoins += 1;
+      state.rain.splice(i,1);
+      showMsg('+1 water');
+      return;
+    }
+  }
+});
+
+/* ======= Initialize & helpers ======= */
+function goHome(){
+  state.running = false;
+  els.gameArea.style.display = 'none';
+  els.endScreen.style.display = 'none';
+  els.homeScreen.style.display = 'flex';
+  loadHigh();
+}
+
+function init(){
+  resizeCanvas();
+  buildGridUI();
+  loadHigh();
+  els.highScoreDisplay.textContent = state.highScore;
+  // hook canvas pointer to pause/resume on double tap? Not necessary
+  // Prepopulate some coins for fun
+  els.waterCoins.textContent = state.waterCoins;
+  // Start on home
+  els.homeScreen.style.display = 'flex';
+}
+init();
+
+/* ======= Timers to convert projectile movement and speed to px/frame ======= */
+/* We need to update projectiles targets movement: we'll interpolate positions each frame */
+(function projectileMover(){
+  // update projectiles positions each 50ms for smoother motion
+  setInterval(()=>{
+    const now = performance.now();
+    for(const p of state.projectiles){
+      if(!p.target || p.target.hp <= 0) continue;
+      // compute direction to target's current position
+      const dx = p.target.x - p.x, dy = p.target.y - p.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if(dist < 8){
+        // hit
+        p.target.hp -= p.dmg;
+        p._hit = true;
+      } else {
+        const step = p.speed * (50/1000);
+        p.x += dx/dist * step;
+        p.y += dy/dist * step;
+      }
+    }
+    // remove hit projectiles
+    for(let i = state.projectiles.length-1;i>=0;i--){
+      if(state.projectiles[i]._hit) state.projectiles.splice(i,1);
+    }
+  }, 50);
+})();
+
+/* ======= Make spawn timing and movement consistent ======= */
+/* We need to update zombies' speed in px/s according to canvas width on resize */
+const resizeObserver = new ResizeObserver(()=>{ resizeCanvas(); });
+resizeObserver.observe(document.getElementById('board'));
+
+/* ======= Start with home visible, load high score ======= */
+loadHigh();
+
+/* ======= Simple auto-save every 15s ======= */
+setInterval(()=>{ if(state.running) saveProgress(); }, 15000);
+
+</script>
+</body>
+</html>
